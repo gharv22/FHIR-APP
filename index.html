@@ -16,6 +16,7 @@
     .identity { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); gap: 1rem; }
     dt { font-weight: 600; }
     dd { margin: 0; overflow-wrap: anywhere; }
+    .identity dd { margin-top: .15rem; }
     .result { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: 1rem 0; border-top: 1px solid #cbd5e1; }
     .result dd { text-align: right; }
     .date { display: block; font-size: .875rem; color: #475569; }
@@ -43,14 +44,10 @@
       <section class="card" aria-labelledby="identity-heading">
       <h2 id="identity-heading">Patient information</h2>
       <dl class="identity">
-        <dt>Name</dt>
-        <dd id="name"></dd>
-        <dt>Gender</dt>
-        <dd id="gender"></dd>
-        <dt>Birth date</dt>
-        <dd id="birth-date"></dd>
-        <dt>Age</dt>
-        <dd id="age"></dd>
+        <div><dt>Name</dt><dd id="name"></dd></div>
+        <div><dt>Gender</dt><dd id="gender"></dd></div>
+        <div><dt>Birth date</dt><dd id="birth-date"></dd></div>
+        <div><dt>Age</dt><dd id="age"></dd></div>
       </dl>
       </section>
       <section class="card" aria-labelledby="results-heading">
@@ -59,6 +56,7 @@
         <p id="results-error" role="alert" class="error" hidden></p>
         <dl id="results-list" hidden>
           <div class="result"><dt>Height</dt><dd><span id="height-value">Not recorded</span><span class="date" id="height-date"></span></dd></div>
+          <div class="result"><dt>Body mass index (BMI)</dt><dd><span id="bmi-value">Not recorded</span><span class="date" id="bmi-date"></span></dd></div>
           <div class="result"><dt>Blood pressure</dt><dd><span id="bp-value">Not recorded</span><span class="date" id="bp-date"></span></dd></div>
           <div class="result"><dt>HDL</dt><dd><span id="hdl-value">Not recorded</span><span class="date" id="hdl-date"></span></dd></div>
           <div class="result"><dt>LDL</dt><dd><span id="ldl-value">Not recorded</span><span class="date" id="ldl-date"></span></dd></div>
@@ -97,8 +95,8 @@
       document.getElementById("signed-out").hidden = true;
       document.getElementById("record").hidden = false;
       document.getElementById("name").textContent = formatName(patient);
-      document.getElementById("gender").textContent = patient.gender || "Not recorded";
-      document.getElementById("birth-date").textContent = patient.birthDate || "Not recorded";
+      document.getElementById("gender").textContent = patient.gender ? patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1) : "Not recorded";
+      document.getElementById("birth-date").textContent = formatBirthDate(patient.birthDate);
       document.getElementById("age").textContent = formatAge(patient.birthDate);
     }
 
@@ -122,6 +120,13 @@
       var given = Array.isArray(name.given) ? name.given.join(" ") : "";
       var family = name.family || "";
       return (given + " " + family).trim() || "Name not recorded";
+    }
+
+    // Formats Patient.birthDate for display without changing its value or guessing missing parts.
+    function formatBirthDate(birthDate) {
+      if (!birthDate) return "Not recorded";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || !Number.isFinite(Date.parse(birthDate))) return birthDate;
+      return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(birthDate));
     }
 
     function formatAge(birthDate) {
@@ -164,11 +169,11 @@
       }
     }
 
-    // Searches only Observation for the authorized patient ID and six LOINC codes.
+    // Searches only Observation for the authorized patient ID and seven LOINC codes, including recorded BMI (39156-5).
     // The client follows Bundle pages and returns the matching resources.
     async function fetchObservations(client) {
       if (!client.patient.id) throw new Error("No patient context");
-      const codes = ["8302-2", "85354-9", "8480-6", "8462-4", "2085-9", "13457-7"];
+      const codes = ["8302-2", "85354-9", "8480-6", "8462-4", "2085-9", "13457-7", "39156-5"];
       const query = new URLSearchParams({
         patient: client.patient.id,
         code: codes.map(code => "http://loinc.org|" + code).join(",")
@@ -203,9 +208,14 @@
       return Number.isFinite(q?.value) ? { value: q.value, unit: q.unit || q.code || "" , code: q.code } : null;
     }
 
-    // Formats the result value and unit together, without inventing a unit.
-    function quantityText(q) {
-      return q ? [q.value, q.unit].filter(v => v !== "").join(" ") : "Not recorded";
+    // Rounds a displayed value to the chosen precision; the original FHIR quantity is unchanged.
+    function formatNumber(value, decimals) {
+      return new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: false }).format(value);
+    }
+
+    // Reads the extracted value and unit for display, using the measurement's chosen precision.
+    function quantityText(q, decimals) {
+      return q ? [formatNumber(q.value, decimals), q.unit].filter(v => v !== "").join(" ") : "Not recorded";
     }
 
     // Reads the newest BP panel's component values first. If no panel exists,
@@ -229,7 +239,7 @@
       if (!systolic || !diastolic || (systolic.code || systolic.unit) !== (diastolic.code || diastolic.unit)) {
         return { value: "Not recorded", date };
       }
-      return { value: systolic.value + "/" + diastolic.value + (systolic.unit ? " " + systolic.unit : ""), date };
+      return { value: formatNumber(systolic.value, 0) + "/" + formatNumber(diastolic.value, 0) + (systolic.unit ? " " + systolic.unit : ""), date };
     }
 
     // Writes plain text into the labeled row. The date is shown when available.
@@ -240,15 +250,15 @@
         : "";
     }
 
-    // Displays four rows, or a clear empty message when no matching codes exist.
+    // Displays five rows, or a clear empty message when no matching codes exist.
     function showResults(resources) {
-      const matching = resources.filter(r => ["8302-2","85354-9","8480-6","8462-4","2085-9","13457-7"].some(code => hasCode(r, code)));
+      const matching = resources.filter(r => ["8302-2","85354-9","8480-6","8462-4","2085-9","13457-7","39156-5"].some(code => hasCode(r, code)));
       const status = document.getElementById("results-status");
       status.textContent = matching.length ? "" : "The sandbox patient has no matching observations.";
       status.hidden = matching.length > 0;
-      for (const [id, code] of [["height","8302-2"],["hdl","2085-9"],["ldl","13457-7"]]) {
+      for (const [id, code, decimals] of [["height","8302-2",1],["bmi","39156-5",1],["hdl","2085-9",0],["ldl","13457-7",0]]) {
         const observation = latest(matching, code);
-        showResult(id, quantityText(quantity(observation)), resultDate(observation));
+        showResult(id, quantityText(quantity(observation), decimals), resultDate(observation));
       }
       const bp = bloodPressure(matching);
       showResult("bp", bp.value, bp.date);
