@@ -32,7 +32,12 @@
     .identity dd { font-weight: 600; }
     .vitals { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .75rem; margin-bottom: 1rem; }
     .vital { border: 1px solid #cbd5e1; border-radius: .65rem; padding: 1rem; background: #f8fafc; }
-    .vital dd > span:first-child { font-size: 1.4rem; font-weight: 700; color: #163b50; }
+    .measurement { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; }
+    .result .measurement { justify-content: flex-end; }
+    .measurement-value { font-size: 1.4rem; font-weight: 700; color: #163b50; }
+    .measurement-unit { font-size: .875rem; color: #475569; font-weight: 500; }
+    .measurement-value.missing { font-size: 1rem; font-weight: 500; }
+    @media (max-width: 360px) { .result .measurement { justify-content: flex-start; } }
     .allergy-list { list-style: none; padding: 0; margin: 0; }
     .allergy-list li { padding: 1rem 0; border-top: 1px solid #cbd5e1; overflow-wrap: anywhere; }
     .allergy-list h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
@@ -50,7 +55,7 @@
     <header class="hero">
       <p class="eyebrow">My Health Record</p>
       <h1>My record</h1>
-      <p>Your personal health information · SMART sandbox</p>
+      <p>Your personal health information</p>
     </header>
 
     <p id="loading" role="status">Checking sign-in…</p>
@@ -85,14 +90,14 @@
         <div id="results-list" hidden>
         <h3 class="subheading">Vitals and measurements</h3>
         <dl class="vitals">
-          <div class="vital"><dt>Height</dt><dd><span id="height-value">Not recorded</span><span class="date" id="height-date"></span></dd></div>
-          <div class="vital"><dt>Body mass index (BMI)</dt><dd><span id="bmi-value">Not recorded</span><span class="date" id="bmi-date"></span></dd></div>
-          <div class="vital"><dt>Blood pressure</dt><dd><span id="bp-value">Not recorded</span><span class="date" id="bp-date"></span></dd></div>
+          <div class="vital"><dt>Height</dt><dd><span class="measurement"><span class="measurement-value missing" id="height-value">Not recorded</span><span class="measurement-unit" id="height-unit"></span></span><span class="date" id="height-date"></span></dd></div>
+          <div class="vital"><dt>Body mass index (BMI)</dt><dd><span class="measurement"><span class="measurement-value missing" id="bmi-value">Not recorded</span><span class="measurement-unit" id="bmi-unit"></span></span><span class="date" id="bmi-date"></span></dd></div>
+          <div class="vital"><dt>Blood pressure</dt><dd><span class="measurement"><span class="measurement-value missing" id="bp-value">Not recorded</span><span class="measurement-unit" id="bp-unit"></span></span><span class="date" id="bp-date"></span></dd></div>
         </dl>
         <h3 class="subheading">Laboratory results</h3>
         <dl>
-          <div class="result"><dt>HDL</dt><dd><span id="hdl-value">Not recorded</span><span class="date" id="hdl-date"></span></dd></div>
-          <div class="result"><dt>LDL</dt><dd><span id="ldl-value">Not recorded</span><span class="date" id="ldl-date"></span></dd></div>
+          <div class="result"><dt>HDL</dt><dd><span class="measurement"><span class="measurement-value missing" id="hdl-value">Not recorded</span><span class="measurement-unit" id="hdl-unit"></span></span><span class="date" id="hdl-date"></span></dd></div>
+          <div class="result"><dt>LDL</dt><dd><span class="measurement"><span class="measurement-value missing" id="ldl-value">Not recorded</span><span class="measurement-unit" id="ldl-unit"></span></span><span class="date" id="ldl-date"></span></dd></div>
         </dl>
         </div>
       </section>
@@ -100,6 +105,7 @@
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
+    <footer style="text-align:center;color:#475569;font-size:.8rem;margin-top:1.25rem;">Educational demonstration · Synthetic patient data</footer>
   </main>
   <script>
     var params = new URLSearchParams(location.search);
@@ -124,7 +130,7 @@
     });
 
     function showPatient(patient) {
-      document.querySelector("h1").textContent = formatName(patient) + " — patient record";
+      document.querySelector("h1").textContent = formatName(patient);
       document.getElementById("loading").hidden = true;
       document.getElementById("signed-out").hidden = true;
       document.getElementById("record").hidden = false;
@@ -328,9 +334,9 @@
       return new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: false }).format(value);
     }
 
-    // Reads the extracted value and unit for display, using the measurement's chosen precision.
+    // Formats the number and unit separately for display, including readable BMI units.
     function quantityText(q, decimals) {
-      return q ? [formatNumber(q.value, decimals), q.unit].filter(v => v !== "").join(" ") : "Not recorded";
+      return q ? { value: formatNumber(q.value, decimals), unit: q.unit === "kg/m2" ? "kg/m²" : q.unit } : { value: "Not recorded", unit: "" };
     }
 
     // Reads quantity units; mmHg and mm[Hg] represent the same pressure unit.
@@ -370,14 +376,18 @@
       const bp = complete[0];
       if (!bp) return { value: "Not recorded", date: "" };
       return {
-        value: formatNumber(bp.s.value, 0) + "/" + formatNumber(bp.d.value, 0) + " " + pressureUnit(bp.s),
+        value: formatNumber(bp.s.value, 0) + "/" + formatNumber(bp.d.value, 0),
+        unit: pressureUnit(bp.s),
         date: bp.date
       };
     }
 
-    // Writes plain text into the labeled row. The date is shown when available.
-    function showResult(id, value, date) {
-      document.getElementById(id + "-value").textContent = value;
+    // Writes the large number and smaller unit as separate text, with the date when available.
+    function showResult(id, value, date, unit = "") {
+      const number = document.getElementById(id + "-value");
+      number.textContent = value;
+      number.classList.toggle("missing", value === "Not recorded");
+      document.getElementById(id + "-unit").textContent = unit;
       document.getElementById(id + "-date").textContent = date
         ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(date))
         : "";
@@ -391,10 +401,11 @@
       status.hidden = matching.length > 0;
       for (const [id, code, decimals] of [["height","8302-2",1],["bmi","39156-5",1],["hdl","2085-9",0],["ldl","13457-7",0]]) {
         const observation = latest(matching, code);
-        showResult(id, quantityText(quantity(observation), decimals), resultDate(observation));
+        const display = quantityText(quantity(observation), decimals);
+        showResult(id, display.value, resultDate(observation), display.unit);
       }
       const bp = bloodPressure(matching);
-      showResult("bp", bp.value, bp.date);
+      showResult("bp", bp.value, bp.date, bp.unit);
       document.getElementById("results-list").hidden = false;
     }
   </script>
