@@ -6,17 +6,32 @@
   <title>My record | SMART Patient App</title>
   <script src="https://cdn.jsdelivr.net/npm/fhirclient@3.0.1/bundle/fhir-client.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; line-height: 1.4; }
-    dt { margin-top: 0.8rem; font-weight: 600; }
-    dd { margin: 0.15rem 0 0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f1f5f9; color: #172b3a; font: 1rem/1.6 system-ui, sans-serif; }
+    main { max-width: 48rem; margin: auto; padding: 1.25rem; }
+    h1 { font-size: 1.85rem; line-height: 1.25; overflow-wrap: anywhere; }
+    h2 { font-size: 1.25rem; margin-top: 0; }
+    .card { background: white; border: 1px solid #cbd5e1; border-radius: .75rem; padding: 1.25rem; margin-bottom: 1rem; }
+    dl { margin: 0; }
+    .identity { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); gap: 1rem; }
+    dt { font-weight: 600; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    .result { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: 1rem 0; border-top: 1px solid #cbd5e1; }
+    .result dd { text-align: right; }
+    .date { display: block; font-size: .875rem; color: #475569; }
+    a { color: #075985; text-underline-offset: .2em; display: inline-block; padding: .5rem 0; }
+    a:focus-visible { outline: 3px solid #075985; outline-offset: 4px; }
     .error { color: #8a1f1f; }
+    [hidden] { display: none !important; }
+    @media (max-width: 360px) { .result { grid-template-columns: 1fr; gap: .25rem; } .result dd { text-align: left; } }
   </style>
 </head>
 <body>
   <main>
     <h1>My record</h1>
 
-    <section id="signed-out">
+    <p id="loading" role="status">Checking sign-in…</p>
+    <section id="signed-out" class="card" hidden>
       <p>Sign in as the patient to see your record from the SMART sandbox.</p>
       <ul>
         <li><a href="./launch.html">Sign in</a></li>
@@ -24,8 +39,10 @@
       </ul>
     </section>
 
-    <section id="record" hidden>
-      <dl>
+    <section id="record" hidden aria-label="Patient record">
+      <section class="card" aria-labelledby="identity-heading">
+      <h2 id="identity-heading">Patient information</h2>
+      <dl class="identity">
         <dt>Name</dt>
         <dd id="name"></dd>
         <dt>Gender</dt>
@@ -35,10 +52,22 @@
         <dt>Age</dt>
         <dd id="age"></dd>
       </dl>
+      </section>
+      <section class="card" aria-labelledby="results-heading">
+        <h2 id="results-heading">Recent results</h2>
+        <p id="results-status" role="status">Loading recent results…</p>
+        <p id="results-error" role="alert" class="error" hidden></p>
+        <dl id="results-list" hidden>
+          <div class="result"><dt>Height</dt><dd><span id="height-value">Not recorded</span><span class="date" id="height-date"></span></dd></div>
+          <div class="result"><dt>Blood pressure</dt><dd><span id="bp-value">Not recorded</span><span class="date" id="bp-date"></span></dd></div>
+          <div class="result"><dt>HDL</dt><dd><span id="hdl-value">Not recorded</span><span class="date" id="hdl-date"></span></dd></div>
+          <div class="result"><dt>LDL</dt><dd><span id="ldl-value">Not recorded</span><span class="date" id="ldl-date"></span></dd></div>
+        </dl>
+      </section>
       <p><a href="./" id="sign-out">Sign out</a></p>
     </section>
 
-    <p id="error" class="error" hidden></p>
+    <p id="error" class="error" role="alert" hidden></p>
   </main>
   <script>
     var params = new URLSearchParams(location.search);
@@ -47,13 +76,12 @@
     // ready() finishes the redirect: it trades the code for a token and
     // restores that session on later visits. It rejects when nobody is signed in.
     FHIR.oauth2.ready()
-      .then(function (client) {
-        return client.patient.read();
-      })
-      .then(showPatient)
-      .catch(function (error) {
+      .then(loadRecord)
+      .catch(function () {
+        document.getElementById("loading").hidden = true;
+        document.getElementById("signed-out").hidden = false;
         if (cameBackFromAuth) {
-          showError(error);
+          showError("Could not complete sign-in. Please try again.");
         }
       });
 
@@ -64,6 +92,8 @@
     });
 
     function showPatient(patient) {
+      document.querySelector("h1").textContent = formatName(patient) + " — patient record";
+      document.getElementById("loading").hidden = true;
       document.getElementById("signed-out").hidden = true;
       document.getElementById("record").hidden = false;
       document.getElementById("name").textContent = formatName(patient);
@@ -95,7 +125,7 @@
     }
 
     function formatAge(birthDate) {
-      if (!birthDate) {
+      if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
         return "Not recorded";
       }
       var parts = birthDate.split("-");
@@ -108,6 +138,121 @@
         age -= 1;
       }
       return age + " years";
+    }
+
+    // Reads the authorized Patient first, then requests observations. Identity stays
+    // visible even if the results request fails.
+    async function loadRecord(client) {
+      document.getElementById("loading").textContent = "Loading patient record…";
+      try {
+        const patient = await client.patient.read();
+        showPatient(patient);
+      } catch (_) {
+        document.getElementById("loading").hidden = true;
+        document.getElementById("signed-out").hidden = false;
+        showError("Could not load your patient record. Please sign in again.");
+        return;
+      }
+      try {
+        const observations = await fetchObservations(client);
+        showResults(observations);
+      } catch (_) {
+        document.getElementById("results-status").hidden = true;
+        const error = document.getElementById("results-error");
+        error.textContent = "Could not load your recent results. Please sign out and sign in again to retry.";
+        error.hidden = false;
+      }
+    }
+
+    // Searches only Observation for the authorized patient ID and six LOINC codes.
+    // The client follows Bundle pages and returns the matching resources.
+    async function fetchObservations(client) {
+      if (!client.patient.id) throw new Error("No patient context");
+      const codes = ["8302-2", "85354-9", "8480-6", "8462-4", "2085-9", "13457-7"];
+      const query = new URLSearchParams({
+        patient: client.patient.id,
+        code: codes.map(code => "http://loinc.org|" + code).join(",")
+      });
+      const resources = await client.request("Observation?" + query.toString(), {
+        flat: true, pageLimit: 0
+      });
+      if (!Array.isArray(resources)) throw new Error("Unexpected search response");
+      return resources.filter(item => item && item.resourceType === "Observation");
+    }
+
+    // Reads the coding list to identify a LOINC measurement, not its display label.
+    function hasCode(resource, code) {
+      return (resource?.code?.coding || []).some(c => c.system === "http://loinc.org" && c.code === code);
+    }
+
+    // Reads effectiveDateTime first, then issued; missing dates sort last.
+    function resultDate(resource) {
+      return [resource?.effectiveDateTime, resource?.issued].find(d => d && Number.isFinite(Date.parse(d))) || "";
+    }
+
+    // Chooses the most recent resource for a code, even if its value is absent.
+    function latest(resources, code) {
+      return resources.filter(r => hasCode(r, code)).sort((a,b) =>
+        (Date.parse(resultDate(b)) || 0) - (Date.parse(resultDate(a)) || 0)
+      )[0];
+    }
+
+    // Reads valueQuantity.value and unit (or UCUM code); missing numbers are not recorded.
+    function quantity(resource) {
+      const q = resource?.valueQuantity;
+      return Number.isFinite(q?.value) ? { value: q.value, unit: q.unit || q.code || "" , code: q.code } : null;
+    }
+
+    // Formats the result value and unit together, without inventing a unit.
+    function quantityText(q) {
+      return q ? [q.value, q.unit].filter(v => v !== "").join(" ") : "Not recorded";
+    }
+
+    // Reads the newest BP panel's component values first. If no panel exists,
+    // uses separate readings only when their recorded timestamps match, so
+    // the student never sees a combined BP from two different encounters.
+    function bloodPressure(resources) {
+      const panel = latest(resources, "85354-9");
+      let systolic, diastolic, date;
+      if (panel) {
+        systolic = quantity((panel.component || []).find(c => hasCode(c, "8480-6")));
+        diastolic = quantity((panel.component || []).find(c => hasCode(c, "8462-4")));
+        date = resultDate(panel);
+      } else {
+        const s = latest(resources, "8480-6");
+        const d = latest(resources, "8462-4");
+        date = resultDate(s);
+        if (!date || Date.parse(date) !== Date.parse(resultDate(d))) return { value: "Not recorded", date: "" };
+        systolic = quantity(s);
+        diastolic = quantity(d);
+      }
+      if (!systolic || !diastolic || (systolic.code || systolic.unit) !== (diastolic.code || diastolic.unit)) {
+        return { value: "Not recorded", date };
+      }
+      return { value: systolic.value + "/" + diastolic.value + (systolic.unit ? " " + systolic.unit : ""), date };
+    }
+
+    // Writes plain text into the labeled row. The date is shown when available.
+    function showResult(id, value, date) {
+      document.getElementById(id + "-value").textContent = value;
+      document.getElementById(id + "-date").textContent = date
+        ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(date))
+        : "";
+    }
+
+    // Displays four rows, or a clear empty message when no matching codes exist.
+    function showResults(resources) {
+      const matching = resources.filter(r => ["8302-2","85354-9","8480-6","8462-4","2085-9","13457-7"].some(code => hasCode(r, code)));
+      const status = document.getElementById("results-status");
+      status.textContent = matching.length ? "" : "The sandbox patient has no matching observations.";
+      status.hidden = matching.length > 0;
+      for (const [id, code] of [["height","8302-2"],["hdl","2085-9"],["ldl","13457-7"]]) {
+        const observation = latest(matching, code);
+        showResult(id, quantityText(quantity(observation)), resultDate(observation));
+      }
+      const bp = bloodPressure(matching);
+      showResult("bp", bp.value, bp.date);
+      document.getElementById("results-list").hidden = false;
     }
   </script>
 </body>
