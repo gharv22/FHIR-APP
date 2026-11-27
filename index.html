@@ -23,13 +23,35 @@
     a { color: #075985; text-underline-offset: .2em; display: inline-block; padding: .5rem 0; }
     a:focus-visible { outline: 3px solid #075985; outline-offset: 4px; }
     .error { color: #8a1f1f; }
+    .hero { background: #163b50; color: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.25rem; }
+    .hero h1 { margin: .25rem 0; }
+    .hero p { margin: 0; color: #e2e8f0; }
+    .eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .card { box-shadow: 0 2px 8px #172b3a08; }
+    .identity dt, .result dt, .vital dt { color: #475569; font-size: .9rem; }
+    .identity dd { font-weight: 600; }
+    .vitals { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .75rem; margin-bottom: 1rem; }
+    .vital { border: 1px solid #cbd5e1; border-radius: .65rem; padding: 1rem; background: #f8fafc; }
+    .vital dd > span:first-child { font-size: 1.4rem; font-weight: 700; color: #163b50; }
+    .allergy-list { list-style: none; padding: 0; margin: 0; }
+    .allergy-list li { padding: 1rem 0; border-top: 1px solid #cbd5e1; overflow-wrap: anywhere; }
+    .allergy-list h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
+    .allergy-list p { margin: .2rem 0; }
+    .allergy-list .high { color: #991b1b; font-weight: 700; }
+    .allergy-card { border-top: 4px solid #a16207; }
+    .subheading { margin: 1rem 0 .75rem; font-size: 1.1rem; }
+    .signout { text-align: right; }
     [hidden] { display: none !important; }
     @media (max-width: 360px) { .result { grid-template-columns: 1fr; gap: .25rem; } .result dd { text-align: left; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>My record</h1>
+    <header class="hero">
+      <p class="eyebrow">My Health Record</p>
+      <h1>My record</h1>
+      <p>Your personal health information · SMART sandbox</p>
+    </header>
 
     <p id="loading" role="status">Checking sign-in…</p>
     <section id="signed-out" class="card" hidden>
@@ -50,19 +72,31 @@
         <div><dt>Age</dt><dd id="age"></dd></div>
       </dl>
       </section>
+      <section class="card allergy-card" aria-labelledby="allergies-heading">
+        <h2 id="allergies-heading">Allergies and intolerances</h2>
+        <p id="allergies-status" role="status">Loading allergy records…</p>
+        <p id="allergies-error" role="alert" class="error" hidden></p>
+        <ul id="allergies-list" class="allergy-list" hidden></ul>
+      </section>
       <section class="card" aria-labelledby="results-heading">
         <h2 id="results-heading">Recent results</h2>
         <p id="results-status" role="status">Loading recent results…</p>
         <p id="results-error" role="alert" class="error" hidden></p>
-        <dl id="results-list" hidden>
-          <div class="result"><dt>Height</dt><dd><span id="height-value">Not recorded</span><span class="date" id="height-date"></span></dd></div>
-          <div class="result"><dt>Body mass index (BMI)</dt><dd><span id="bmi-value">Not recorded</span><span class="date" id="bmi-date"></span></dd></div>
-          <div class="result"><dt>Blood pressure</dt><dd><span id="bp-value">Not recorded</span><span class="date" id="bp-date"></span></dd></div>
+        <div id="results-list" hidden>
+        <h3 class="subheading">Vitals and measurements</h3>
+        <dl class="vitals">
+          <div class="vital"><dt>Height</dt><dd><span id="height-value">Not recorded</span><span class="date" id="height-date"></span></dd></div>
+          <div class="vital"><dt>Body mass index (BMI)</dt><dd><span id="bmi-value">Not recorded</span><span class="date" id="bmi-date"></span></dd></div>
+          <div class="vital"><dt>Blood pressure</dt><dd><span id="bp-value">Not recorded</span><span class="date" id="bp-date"></span></dd></div>
+        </dl>
+        <h3 class="subheading">Laboratory results</h3>
+        <dl>
           <div class="result"><dt>HDL</dt><dd><span id="hdl-value">Not recorded</span><span class="date" id="hdl-date"></span></dd></div>
           <div class="result"><dt>LDL</dt><dd><span id="ldl-value">Not recorded</span><span class="date" id="ldl-date"></span></dd></div>
         </dl>
+        </div>
       </section>
-      <p><a href="./" id="sign-out">Sign out</a></p>
+      <p class="signout"><a href="./" id="sign-out">Sign out</a></p>
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
@@ -158,6 +192,12 @@
         showError("Could not load your patient record. Please sign in again.");
         return;
       }
+      // Start allergy and observation reads independently so either section can succeed.
+      await Promise.all([loadAllergies(client), loadObservations(client)]);
+    }
+
+    // Requests observation results and displays their existing loading/error states.
+    async function loadObservations(client) {
       try {
         const observations = await fetchObservations(client);
         showResults(observations);
@@ -167,6 +207,81 @@
         error.textContent = "Could not load your recent results. Please sign out and sign in again to retry.";
         error.hidden = false;
       }
+    }
+
+
+    // Requests only AllergyIntolerance for the authorized patient; follows all Bundle pages.
+    async function loadAllergies(client) {
+      const status = document.getElementById("allergies-status");
+      try {
+        if (!client.patient.id) throw new Error("No patient context");
+        const query = new URLSearchParams({ patient: client.patient.id });
+        const resources = await client.request("AllergyIntolerance?" + query.toString(), { flat: true, pageLimit: 0 });
+        if (!Array.isArray(resources)) throw new Error("Unexpected allergy response");
+        showAllergies(resources.filter(r => r && r.resourceType === "AllergyIntolerance"));
+      } catch (_) {
+        status.hidden = true;
+        const error = document.getElementById("allergies-error");
+        error.textContent = "Could not load allergy records. Please sign out and sign in again to retry.";
+        error.hidden = false;
+      }
+    }
+
+    // Reads a FHIR CodeableConcept's text, display, or code; never invents a clinical label.
+    function conceptLabel(concept) {
+      return concept?.text || concept?.coding?.find(c => c.display)?.display ||
+        concept?.coding?.find(c => c.code)?.code || "";
+    }
+
+    // Reads status codes to distinguish active, resolved, refuted and erroneous records.
+    function conceptCode(concept) {
+      return concept?.coding?.find(c => c.code)?.code || "";
+    }
+
+    // Makes coded labels readable without changing the underlying resource.
+    function readableLabel(value) {
+      return value ? value.charAt(0).toUpperCase() + value.slice(1).replace(/-/g, " ") : "Not recorded";
+    }
+
+    // Displays allergen, type, category, reactions, severity, criticality and status as text.
+    // Missing records are not evidence that the patient has no allergies.
+    function showAllergies(resources) {
+      const list = document.getElementById("allergies-list");
+      const status = document.getElementById("allergies-status");
+      list.replaceChildren();
+      const records = resources.filter(r => conceptCode(r.verificationStatus) !== "entered-in-error");
+      if (!records.length) {
+        status.textContent = "No allergy records found. This does not confirm that you have no allergies.";
+        return;
+      }
+      for (const record of records) {
+        const item = document.createElement("li");
+        const heading = document.createElement("h3");
+        heading.textContent = conceptLabel(record.code) || "Allergen not recorded";
+        item.appendChild(heading);
+        const reactions = (record.reaction || []).flatMap(reaction =>
+          (reaction.manifestation || []).map(m => {
+            const label = conceptLabel(m);
+            return label ? label + (reaction.severity ? " (" + reaction.severity + ")" : "") : "";
+          }).filter(Boolean));
+        const fields = [
+          ["Reaction", reactions.join("; ") || "Not recorded"],
+          ["Type", readableLabel(record.type)],
+          ["Category", (record.category || []).map(readableLabel).join(", ") || "Not recorded"],
+          ["Clinical status", readableLabel(conceptLabel(record.clinicalStatus))],
+          ["Verification", readableLabel(conceptLabel(record.verificationStatus))],
+          ["Criticality", readableLabel(record.criticality)]
+        ];
+        for (const [label, value] of fields) {
+          const line = document.createElement("p");
+          line.textContent = label + ": " + value;
+          if (label === "Criticality" && record.criticality === "high") line.className = "high";
+          item.appendChild(line);
+        }
+        list.appendChild(item);
+      }
+      status.hidden = true;
+      list.hidden = false;
     }
 
     // Searches only Observation for the authorized patient ID and eight LOINC codes, including recorded BMI (39156-5).
