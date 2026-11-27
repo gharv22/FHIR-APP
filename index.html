@@ -45,6 +45,15 @@
     .allergy-list p { margin: .2rem 0; }
     .allergy-list .high { color: #991b1b; font-weight: 700; }
     .allergy-card { border-top: 4px solid #a16207; }
+    .med-list { list-style: none; margin: 0; padding: 0; }
+    .med-list li { padding: 1rem 0; border-top: 1px solid #c6d1c1; overflow-wrap: anywhere; }
+    .med-list h4 { margin: 0 0 .35rem; font-size: 1.1rem; }
+    .med-list p { margin: .3rem 0; }
+    .med-status { display: inline-block; padding: .15rem .55rem; border: 1px solid #c6d1c1; border-radius: .35rem; background: #e8eee5; font-size: .875rem; font-weight: 600; }
+    .med-note { color: #424b42; font-size: .875rem; }
+    .med-history { margin-top: 1rem; }
+    .med-history summary { cursor: pointer; font-weight: 600; padding: .5rem 0; }
+    .med-history summary:focus-visible { outline: 3px solid #365344; outline-offset: 4px; }
     .subheading { margin: 1rem 0 .75rem; font-size: 1.1rem; }
     .signout { text-align: right; }
     [hidden] { display: none !important; }
@@ -83,6 +92,21 @@
         <p id="allergies-status" role="status">Loading allergy records…</p>
         <p id="allergies-error" role="alert" class="error" hidden></p>
         <ul id="allergies-list" class="allergy-list" hidden></ul>
+      </section>
+      <section class="card" aria-labelledby="medications-heading">
+        <h2 id="medications-heading">Medications</h2>
+        <p class="med-note">Prescriptions in your record. This list may not reflect everything you currently take.</p>
+        <p id="medications-status" role="status">Loading medication records…</p>
+        <p id="medications-error" role="alert" class="error" hidden></p>
+        <div id="medications-content" hidden>
+          <h3 class="subheading">Active prescriptions</h3>
+          <p id="medications-active-empty" hidden>No active prescriptions found.</p>
+          <ul id="medications-active" class="med-list"></ul>
+          <details id="medications-history" class="med-history" hidden>
+            <summary id="medications-history-heading">Other prescription records</summary>
+            <ul id="medications-other" class="med-list"></ul>
+          </details>
+        </div>
       </section>
       <section class="card" aria-labelledby="results-heading">
         <h2 id="results-heading">Recent results</h2>
@@ -199,8 +223,8 @@
         showError("Could not load your patient record. Please sign in again.");
         return;
       }
-      // Start allergy and observation reads independently so either section can succeed.
-      await Promise.all([loadAllergies(client), loadObservations(client)]);
+      // Start independent reads so one failed request cannot hide another section.
+      await Promise.all([loadAllergies(client), loadMedications(client), loadObservations(client)]);
     }
 
     // Requests observation results and displays their existing loading/error states.
@@ -289,6 +313,131 @@
       }
       status.hidden = true;
       list.hidden = false;
+    }
+
+
+    // Requests MedicationRequest records for only the authorized patient and follows Bundle pages.
+    // These are prescription records, not proof of what a patient is currently taking.
+    async function loadMedications(client) {
+      const status = document.getElementById("medications-status");
+      try {
+        if (!client.patient.id) throw new Error("No patient context");
+        const query = new URLSearchParams({ patient: client.patient.id });
+        const resources = await client.request("MedicationRequest?" + query.toString(), { flat: true, pageLimit: 0 });
+        if (!Array.isArray(resources)) throw new Error("Unexpected medication response");
+        showMedications(resources.filter(r => r && r.resourceType === "MedicationRequest"));
+      } catch (_) {
+        status.hidden = true;
+        const error = document.getElementById("medications-error");
+        error.textContent = "Could not load medication records. Please sign out and sign in again to retry.";
+        error.hidden = false;
+      }
+    }
+
+    // Reads the medication concept or reference display, including contained Medication resources.
+    // An unresolved reference is labeled honestly; no drug name or strength is guessed.
+    function medicationName(record) {
+      const ref = record.medicationReference;
+      const contained = ref?.reference?.startsWith("#")
+        ? (record.contained || []).find(m => m.resourceType === "Medication" && "#" + m.id === ref.reference)
+        : null;
+      return conceptLabel(record.medicationCodeableConcept) || ref?.display ||
+        conceptLabel(contained?.code) || "Medication name not recorded";
+    }
+
+    // Reads doseQuantity or doseRange exactly as recorded, including the unit.
+    function medicationDose(doseAndRate) {
+      const q = doseAndRate?.doseQuantity;
+      const range = doseAndRate?.doseRange;
+      const asText = v => Number.isFinite(v?.value)
+        ? [v.comparator, v.value, v.unit || v.code].filter(x => x !== undefined && x !== "").join(" ") : "";
+      if (q) return asText(q);
+      if (range) return [asText(range.low), asText(range.high)].filter(Boolean).join(" to ");
+      return "";
+    }
+
+    // Reads dosageInstruction.text first; if absent, describes only recorded dose, route and timing.
+    // Complex schedules are not simplified into an invented patient instruction.
+    function medicationDirections(record) {
+      return (record.dosageInstruction || []).map(d => {
+        if (d.text) return d.text;
+        const parts = [];
+        const doses = (d.doseAndRate || []).map(medicationDose).filter(Boolean);
+        if (doses.length) parts.push("Dose: " + doses.join("; "));
+        const route = conceptLabel(d.route);
+        if (route) parts.push("Route: " + route);
+        const timing = conceptLabel(d.timing?.code);
+        if (timing) parts.push("Timing: " + timing);
+        else {
+          const repeat = d.timing?.repeat;
+          if (repeat?.frequency && repeat?.period && repeat?.periodUnit) {
+            const units = { s: "second", min: "minute", h: "hour", d: "day", wk: "week", mo: "month", a: "year" };
+            const unit = units[repeat.periodUnit] || repeat.periodUnit;
+            parts.push("Recorded frequency: " + repeat.frequency +
+              (repeat.frequencyMax && repeat.frequencyMax !== repeat.frequency ? "–" + repeat.frequencyMax : "") +
+              " time(s) per " + repeat.period +
+              (repeat.periodMax && repeat.periodMax !== repeat.period ? "–" + repeat.periodMax : "") +
+              " " + unit + "(s)");
+          }
+        }
+        if (d.asNeededBoolean === true || d.asNeededCodeableConcept) {
+          const reason = conceptLabel(d.asNeededCodeableConcept);
+          parts.push("As needed" + (reason ? " for " + reason : ""));
+        }
+        if (d.patientInstruction) parts.push(d.patientInstruction);
+        return parts.join(" · ");
+      }).filter(Boolean).join("; ") || "Not recorded";
+    }
+
+    // Displays a prescription's name, status, directions and authoredOn date as safe text.
+    function medicationItem(record) {
+      const item = document.createElement("li");
+      const heading = document.createElement("h4");
+      heading.textContent = medicationName(record);
+      item.appendChild(heading);
+      const status = document.createElement("span");
+      status.className = "med-status";
+      status.textContent = "Status: " + readableLabel(record.status);
+      item.appendChild(status);
+      const fields = [
+        ["Directions", medicationDirections(record)],
+        ["Order type", readableLabel(record.intent)],
+        ["Prescribed", formatBirthDate(record.authoredOn?.slice(0,10))]
+      ];
+      for (const [label, value] of fields) {
+        const line = document.createElement("p");
+        const title = document.createElement("strong");
+        title.textContent = label + ": ";
+        line.append(title, document.createTextNode(value));
+        item.appendChild(line);
+      }
+      return item;
+    }
+
+    // Groups active orders separately from other statuses, without claiming adherence.
+    // Excludes entered-in-error records and explains the empty state.
+    function showMedications(resources) {
+      const status = document.getElementById("medications-status");
+      const active = document.getElementById("medications-active");
+      const other = document.getElementById("medications-other");
+      active.replaceChildren();
+      other.replaceChildren();
+      const records = resources.filter(r => r.status !== "entered-in-error")
+        .sort((a,b) => (Date.parse(b.authoredOn) || 0) - (Date.parse(a.authoredOn) || 0));
+      if (!records.length) {
+        status.textContent = "No medication records found. This does not mean you take no medications.";
+        return;
+      }
+      const orderIntents = ["order", "original-order", "reflex-order", "filler-order", "instance-order"];
+      const current = records.filter(r => r.status === "active" && orderIntents.includes(r.intent));
+      const history = records.filter(r => !current.includes(r));
+      current.forEach(r => active.appendChild(medicationItem(r)));
+      history.forEach(r => other.appendChild(medicationItem(r)));
+      document.getElementById("medications-active-empty").hidden = current.length > 0;
+      document.getElementById("medications-history").hidden = history.length === 0;
+      document.getElementById("medications-history-heading").textContent = "Other prescription records (" + history.length + ")";
+      document.getElementById("medications-content").hidden = false;
+      status.hidden = true;
     }
 
     // Searches only Observation for the authorized patient ID and eight LOINC codes, including recorded BMI (39156-5).
