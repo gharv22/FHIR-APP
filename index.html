@@ -7,39 +7,40 @@
   <script src="https://cdn.jsdelivr.net/npm/fhirclient@3.0.1/bundle/fhir-client.js"></script>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f1f5f9; color: #172b3a; font: 1rem/1.6 system-ui, sans-serif; }
+    body { margin: 0; background: #eeefed; color: #343c42; font: 1rem/1.6 system-ui, sans-serif; }
     main { max-width: 48rem; margin: auto; padding: 1.25rem; }
     h1 { font-size: 1.85rem; line-height: 1.25; overflow-wrap: anywhere; }
     h2 { font-size: 1.25rem; margin-top: 0; }
-    .card { background: white; border: 1px solid #cbd5e1; border-radius: .75rem; padding: 1.25rem; margin-bottom: 1rem; }
+    .card { background: white; border: 1px solid #c6d1c1; border-radius: .75rem; padding: 1.25rem; margin-bottom: 1rem; }
     dl { margin: 0; }
     .identity { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr)); gap: 1rem; }
     dt { font-weight: 600; }
     dd { margin: 0; overflow-wrap: anywhere; }
     .identity dd { margin-top: .15rem; }
-    .result { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: 1rem 0; border-top: 1px solid #cbd5e1; }
+    .result { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: 1rem 0; border-top: 1px solid #c6d1c1; }
     .result dd { text-align: right; }
-    .date { display: block; font-size: .875rem; color: #475569; }
-    a { color: #075985; text-underline-offset: .2em; display: inline-block; padding: .5rem 0; }
-    a:focus-visible { outline: 3px solid #075985; outline-offset: 4px; }
+    .date { display: block; font-size: .875rem; color: #424b42; }
+    a { color: #365344; text-underline-offset: .2em; display: inline-block; padding: .5rem 0; }
+    a:focus-visible { outline: 3px solid #365344; outline-offset: 4px; }
     .error { color: #8a1f1f; }
-    .hero { background: #163b50; color: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.25rem; }
+    .hero { background: #343c42; color: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.25rem; }
     .hero h1 { margin: .25rem 0; }
-    .hero p { margin: 0; color: #e2e8f0; }
+    .hero p { margin: 0; color: #e5e7eb; }
+    .hero .eyebrow { color: #dce8d9; }
     .eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .card { box-shadow: 0 2px 8px #172b3a08; }
-    .identity dt, .result dt, .vital dt { color: #475569; font-size: .9rem; }
+    .card { box-shadow: 0 2px 8px #343c4208; }
+    .identity dt, .result dt, .vital dt { color: #424b42; font-size: .9rem; }
     .identity dd { font-weight: 600; }
     .vitals { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap: .75rem; margin-bottom: 1rem; }
-    .vital { border: 1px solid #cbd5e1; border-radius: .65rem; padding: 1rem; background: #f8fafc; }
+    .vital { border: 1px solid #c6d1c1; border-radius: .65rem; padding: 1rem; background: #e8eee5; }
     .measurement { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; }
     .result .measurement { justify-content: flex-end; }
-    .measurement-value { font-size: 1.4rem; font-weight: 700; color: #163b50; }
-    .measurement-unit { font-size: .875rem; color: #475569; font-weight: 500; }
+    .measurement-value { font-size: 1.4rem; font-weight: 700; color: #343c42; }
+    .measurement-unit { font-size: .875rem; color: #424b42; font-weight: 500; }
     .measurement-value.missing { font-size: 1rem; font-weight: 500; }
     @media (max-width: 360px) { .result .measurement { justify-content: flex-start; } }
     .allergy-list { list-style: none; padding: 0; margin: 0; }
-    .allergy-list li { padding: 1rem 0; border-top: 1px solid #cbd5e1; overflow-wrap: anywhere; }
+    .allergy-list li { padding: 1rem 0; border-top: 1px solid #c6d1c1; overflow-wrap: anywhere; }
     .allergy-list h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
     .allergy-list p { margin: .2rem 0; }
     .allergy-list .high { color: #991b1b; font-weight: 700; }
@@ -78,7 +79,7 @@
       </dl>
       </section>
       <section class="card allergy-card" aria-labelledby="allergies-heading">
-        <h2 id="allergies-heading">Allergies and intolerances</h2>
+        <h2 id="allergies-heading">Allergies</h2>
         <p id="allergies-status" role="status">Loading allergy records…</p>
         <p id="allergies-error" role="alert" class="error" hidden></p>
         <ul id="allergies-list" class="allergy-list" hidden></ul>
@@ -105,7 +106,7 @@
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
-    <footer style="text-align:center;color:#475569;font-size:.8rem;margin-top:1.25rem;">Educational demonstration · Synthetic patient data</footer>
+    <footer style="text-align:center;color:#424b42;font-size:.8rem;margin-top:1.25rem;">Educational demonstration · Synthetic patient data</footer>
   </main>
   <script>
     var params = new URLSearchParams(location.search);
