@@ -169,11 +169,11 @@
       }
     }
 
-    // Searches only Observation for the authorized patient ID and seven LOINC codes, including recorded BMI (39156-5).
+    // Searches only Observation for the authorized patient ID and eight LOINC codes, including recorded BMI (39156-5).
     // The client follows Bundle pages and returns the matching resources.
     async function fetchObservations(client) {
       if (!client.patient.id) throw new Error("No patient context");
-      const codes = ["8302-2", "85354-9", "8480-6", "8462-4", "2085-9", "13457-7", "39156-5"];
+      const codes = ["8302-2", "85354-9", "55284-4", "8480-6", "8462-4", "2085-9", "13457-7", "39156-5"];
       const query = new URLSearchParams({
         patient: client.patient.id,
         code: codes.map(code => "http://loinc.org|" + code).join(",")
@@ -218,28 +218,46 @@
       return q ? [formatNumber(q.value, decimals), q.unit].filter(v => v !== "").join(" ") : "Not recorded";
     }
 
-    // Reads the newest BP panel's component values first. If no panel exists,
-    // uses separate readings only when their recorded timestamps match, so
-    // the student never sees a combined BP from two different encounters.
+    // Reads quantity units; mmHg and mm[Hg] represent the same pressure unit.
+    function pressureUnit(q) {
+      const unit = q?.code || q?.unit || "";
+      return /^mm\s*\[?hg\]?$/i.test(unit) ? "mmHg" : unit;
+    }
+
+    // Reads both BP panel codes and their systolic/diastolic components.
+    // Also checks standalone observations from the same effective timestamp,
+    // never combining unrelated readings. Displays the newest complete pair.
     function bloodPressure(resources) {
-      const panel = latest(resources, "85354-9");
-      let systolic, diastolic, date;
-      if (panel) {
-        systolic = quantity((panel.component || []).find(c => hasCode(c, "8480-6")));
-        diastolic = quantity((panel.component || []).find(c => hasCode(c, "8462-4")));
-        date = resultDate(panel);
-      } else {
-        const s = latest(resources, "8480-6");
-        const d = latest(resources, "8462-4");
-        date = resultDate(s);
-        if (!date || Date.parse(date) !== Date.parse(resultDate(d))) return { value: "Not recorded", date: "" };
-        systolic = quantity(s);
-        diastolic = quantity(d);
+      const candidates = [];
+      const panels = resources.filter(r => hasCode(r, "85354-9") || hasCode(r, "55284-4"));
+      for (const panel of panels) {
+        candidates.push({
+          s: quantity((panel.component || []).find(c => hasCode(c, "8480-6"))),
+          d: quantity((panel.component || []).find(c => hasCode(c, "8462-4"))),
+          date: resultDate(panel)
+        });
       }
-      if (!systolic || !diastolic || (systolic.code || systolic.unit) !== (diastolic.code || diastolic.unit)) {
-        return { value: "Not recorded", date };
+      const systolics = resources.filter(r => hasCode(r, "8480-6"));
+      const diastolics = resources.filter(r => hasCode(r, "8462-4"));
+      for (const s of systolics) {
+        for (const d of diastolics) {
+          // An exact effective time and compatible encounter references are required.
+          if (!s.effectiveDateTime || !d.effectiveDateTime ||
+              !s.effectiveDateTime.includes("T") || !d.effectiveDateTime.includes("T") ||
+              Date.parse(s.effectiveDateTime) !== Date.parse(d.effectiveDateTime)) continue;
+          if ((s.encounter?.reference || "") !== (d.encounter?.reference || "")) continue;
+          candidates.push({ s: quantity(s), d: quantity(d), date: resultDate(s) });
+        }
       }
-      return { value: formatNumber(systolic.value, 0) + "/" + formatNumber(diastolic.value, 0) + (systolic.unit ? " " + systolic.unit : ""), date };
+      const complete = candidates.filter(p => p.s && p.d && pressureUnit(p.s) &&
+        pressureUnit(p.s) === pressureUnit(p.d))
+        .sort((a,b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+      const bp = complete[0];
+      if (!bp) return { value: "Not recorded", date: "" };
+      return {
+        value: formatNumber(bp.s.value, 0) + "/" + formatNumber(bp.d.value, 0) + " " + pressureUnit(bp.s),
+        date: bp.date
+      };
     }
 
     // Writes plain text into the labeled row. The date is shown when available.
@@ -252,7 +270,7 @@
 
     // Displays five rows, or a clear empty message when no matching codes exist.
     function showResults(resources) {
-      const matching = resources.filter(r => ["8302-2","85354-9","8480-6","8462-4","2085-9","13457-7","39156-5"].some(code => hasCode(r, code)));
+      const matching = resources.filter(r => ["8302-2","85354-9","55284-4","8480-6","8462-4","2085-9","13457-7","39156-5"].some(code => hasCode(r, code)));
       const status = document.getElementById("results-status");
       status.textContent = matching.length ? "" : "The sandbox patient has no matching observations.";
       status.hidden = matching.length > 0;
