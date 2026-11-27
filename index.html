@@ -50,7 +50,7 @@
     <header class="hero">
       <p class="eyebrow">My Health Record</p>
       <h1>My record</h1>
-      <p>Your personal health information · SMART sandbox</p>
+      <p>Your personal health information</p>
     </header>
 
     <p id="loading" role="status">Checking sign-in…</p>
@@ -100,6 +100,7 @@
     </section>
 
     <p id="error" class="error" role="alert" hidden></p>
+    <footer style="text-align:center;color:#475569;font-size:.8rem;margin-top:1.25rem;">Educational demonstration · Synthetic patient data</footer>
   </main>
   <script>
     var params = new URLSearchParams(location.search);
@@ -124,7 +125,7 @@
     });
 
     function showPatient(patient) {
-      document.querySelector("h1").textContent = formatName(patient) + " — patient record";
+      document.querySelector("h1").textContent = formatName(patient);
       document.getElementById("loading").hidden = true;
       document.getElementById("signed-out").hidden = true;
       document.getElementById("record").hidden = false;
